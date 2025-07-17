@@ -1,0 +1,183 @@
+{
+  "trading": {
+    "mode": "SIGNAL_ONLY",
+    "pairs": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "BNBUSDT",
+      "SOLUSDT",
+      "ADAUSDT",
+      "DOTUSDT",
+      "LINKUSDT",
+      "UNIUSDT",
+      "AAVEUSDT",
+      "MATICUSDT",
+      "AVAXUSDT",
+      "ATOMUSDT"
+    ],
+    "risk_percentage": 0.5,
+    "max_daily_loss": 3.0,
+    "max_positions": 3,
+    "stop_loss_percentage": 2.0,
+    "take_profit_percentage": 3.0,
+    "trailing_stop": true,
+    "trailing_stop_distance": 0.5,
+    "kill_zones": {
+      "asia": {
+        "start": "02:00",
+        "end": "05:00",
+        "pairs": ["BTCUSDT", "ETHUSDT"],
+        "volume_multiplier": 1.5
+      },
+      "london": {
+        "start": "10:00",
+        "end": "14:00",
+        "pairs": ["BTCUSDT", "ETHUSDT", "BNBUSDT"],
+        "volume_multiplier": 2.0
+      },
+      "newyork": {
+        "start": "16:00",
+        "end": "20:00",
+        "pairs": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+        "volume_multiplier": 2.5
+      }
+    },
+    "ict_settings": {
+      "pdh_pdl_enabled": true,
+      "ssl_bsl_enabled": true,
+      "fvg_enabled": true,
+      "order_blocks_enabled": true,
+      "liquidity_pools_threshold": 1000000,
+      "breaker_block_sensitivity": 0.7,
+      "eqh_eql_tolerance": 0.1
+    },
+    "smt_settings": {
+      "whale_threshold_btc": 100,
+      "whale_threshold_eth": 1000,
+      "accumulation_period": 7,
+      "distribution_period": 3,
+      "manipulation_detection": true,
+      "cold_storage_tracking": true
+    }
+  },
+  "telegram": {
+    "signal_format": "professional",
+    "language": "uz",
+    "timezone": "Asia/Tashkent",
+    "admin_ids": [],
+    "channel_id": "",
+    "signal_templates": {
+      "buy": "📈 SIGNAL KELDI\n════════════════\n📈 Savdo: BUY {pair}\n💰 Narx: ${price}\n📊 Lot: {lot_size}\n🛡️ Stop Loss: ${stop_loss} ({stop_percentage}%)\n🎯 Take Profit: ${take_profit} ({tp_percentage}%)\n⚡ Ishonch: {confidence}%\n🔥 Risk: {risk}%\n════════════════\n📝 Sabab: {reason}\n🐋 On-chain: {onchain_data}\n⏰ Vaqt: {time} (UZB)",
+      "sell": "📉 SIGNAL KELDI\n════════════════\n📉 Savdo: SELL {pair}\n💰 Narx: ${price}\n📊 Lot: {lot_size}\n🛡️ Stop Loss: ${stop_loss} ({stop_percentage}%)\n🎯 Take Profit: ${take_profit} ({tp_percentage}%)\n⚡ Ishonch: {confidence}%\n🔥 Risk: {risk}%\n════════════════\n📝 Sabab: {reason}\n🐋 On-chain: {onchain_data}\n⏰ Vaqt: {time} (UZB)"
+    },
+    "buttons": {
+      "auto_trade": "🟢 AVTO SAVDO",
+      "cancel": "🔴 BEKOR QILISH",
+      "bot_start": "🟢 Bot Ishga Tushirish",
+      "bot_stop": "🔴 Bot To'xtatish",
+      "pause": "⏸️ Pauza Rejim",
+      "risk_up": "🔄 Risk 1%ga",
+      "statistics": "📊 Statistika"
+    }
+  },
+  "apis": {
+    "order_flow": {
+      "primary": "1inch",
+      "fallback": ["alchemy", "thegraph"],
+      "retry_count": 3,
+      "timeout": 30
+    },
+    "sentiment": {
+      "primary": "huggingface",
+      "fallback": ["gemini", "claude"],
+      "models": {
+        "huggingface": "finiteautomata/bertweet-base-sentiment-analysis",
+        "gemini": "gemini-pro",
+        "claude": "claude-3-opus-20240229"
+      }
+    },
+    "news": {
+      "primary": "newsapi",
+      "fallback": ["reddit", "cryptopanic"],
+      "sources": ["coindesk", "cointelegraph", "decrypt", "theblock"],
+      "keywords": ["bitcoin", "ethereum", "crypto", "defi", "whale", "regulation"]
+    },
+    "market": {
+      "primary": "ccxt",
+      "fallback": ["coingecko", "binance"],
+      "exchange": "binance",
+      "update_interval": 5
+    }
+  },
+  "features": {
+    "auto_trading": false,
+    "signal_only": true,
+    "news_filter": true,
+    "whale_alerts": true,
+    "ai_learning": true,
+    "backtesting": true,
+    "paper_trading": true,
+    "multi_timeframe": true,
+    "correlation_analysis": true,
+    "portfolio_optimization": true
+  },
+  "notifications": {
+    "signal_alerts": true,
+    "stop_loss_alerts": true,
+    "take_profit_alerts": true,
+    "whale_movement_alerts": true,
+    "news_alerts": true,
+    "system_alerts": true,
+    "daily_summary": true,
+    "weekly_report": true
+  },
+  "risk_management": {
+    "dynamic_risk": true,
+    "min_risk": 0.5,
+    "max_risk": 1.0,
+    "risk_adjustment_factors": {
+      "win_rate": 0.3,
+      "market_volatility": 0.3,
+      "account_balance": 0.2,
+      "time_of_day": 0.2
+    },
+    "stop_after_losses": 2,
+    "daily_pause_after_stops": 3,
+    "max_drawdown": 10.0,
+    "position_sizing": "kelly_criterion"
+  },
+  "database": {
+    "type": "sqlite",
+    "path": "data/trading_bot.db",
+    "backup_enabled": true,
+    "backup_interval": 86400,
+    "retention_days": 90
+  },
+  "logging": {
+    "level": "INFO",
+    "max_file_size": 52428800,
+    "backup_count": 10,
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "separate_files": {
+      "bot": true,
+      "api": true,
+      "trading": true,
+      "error": true
+    }
+  },
+  "performance": {
+    "cache_enabled": true,
+    "cache_ttl": 300,
+    "rate_limit_buffer": 0.8,
+    "concurrent_requests": 10,
+    "batch_processing": true,
+    "batch_size": 100
+  },
+  "security": {
+    "encrypt_api_keys": true,
+    "ip_whitelist": [],
+    "require_2fa": false,
+    "session_timeout": 3600,
+    "max_login_attempts": 5
+  }
+}
