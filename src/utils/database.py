@@ -1,60 +1,127 @@
 """
-Database Manager and Models
-SQLAlchemy models, async database operations
+Advanced Database Manager with Connection Pooling and Performance Optimization
+SQLite va PostgreSQL uchun async database operations
 """
 import asyncio
-from typing import Dict, Any, Optional, List, Union
-from datetime import datetime, timedelta
-from decimal import Decimal
-from enum import Enum
 import json
+from typing import Dict, Any, Optional, List, Union, AsyncGenerator
+from dataclasses import dataclass, field, asdict
+from datetime import datetime, timedelta
+from enum import Enum, auto
+import logging
+import sqlite3
+from pathlib import Path
 
-from sqlalchemy import (
-    create_engine, Column, String, Float, Integer, DateTime, 
-    Boolean, JSON, Text, ForeignKey, Index, UniqueConstraint,
-    select, and_, or_, desc, asc
+from sqlalchemy.ext.asyncio import (
+    AsyncSession, AsyncEngine, create_async_engine, 
+    async_sessionmaker, AsyncConnection
 )
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship, Session
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import QueuePool, StaticPool
+from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import (
+    Column, Integer, String, Float, DateTime, Boolean, 
+    Text, JSON, Index, event, select, update, delete,
+    func, and_, or_, desc, asc
+)
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
+import uuid
 
-from src.utils.logger import get_logger
-from src.utils.helpers import TimeUtils
+from utils.logger import get_logger
+from utils.helpers import TimeUtils
 
 logger = get_logger(__name__)
 
-# Base class for models
+# SQLAlchemy Base
 Base = declarative_base()
 
-# Enums
-class TradeStatus(str, Enum):
-    PENDING = "PENDING"
-    OPEN = "OPEN"
-    CLOSED = "CLOSED"
-    CANCELLED = "CANCELLED"
+class SignalStatus(Enum):
+    """Signal holati"""
+    PENDING = "pending"
+    EXECUTED = "executed"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
 
-class OrderType(str, Enum):
-    MARKET = "MARKET"
-    LIMIT = "LIMIT"
-    STOP_LOSS = "STOP_LOSS"
-    TAKE_PROFIT = "TAKE_PROFIT"
-
-class SignalType(str, Enum):
-    STRONG_BUY = "STRONG_BUY"
-    BUY = "BUY"
-    NEUTRAL = "NEUTRAL"
-    SELL = "SELL"
-    STRONG_SELL = "STRONG_SELL"
+class TradeStatus(Enum):
+    """Trade holati"""
+    OPEN = "open"
+    CLOSED = "closed"
+    CANCELLED = "cancelled"
 
 # Database Models
+class TradingSignal(Base):
+    """Trading signal modeli"""
+    __tablename__ = 'trading_signals'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    signal_id = Column(String(36), unique=True, default=lambda: str(uuid.uuid4()))
+    symbol = Column(String(20), nullable=False, index=True)
+    type = Column(String(20), nullable=False)  # BUY, SELL, STRONG_BUY, etc.
+    action = Column(String(10), nullable=False)  # BUY, SELL
+    entry_price = Column(Float, nullable=False)
+    stop_loss = Column(Float, nullable=False)
+    take_profit_1 = Column(Float)
+    take_profit_2 = Column(Float)
+    take_profit_3 = Column(Float)
+    confidence = Column(Float, nullable=False)
+    position_size = Column(Float)
+    risk_reward_ratio = Column(Float)
+    sources = Column(JSON)  # Analysis sources
+    reasoning = Column(JSON)  # Reasoning list
+    status = Column(String(20), default=SignalStatus.PENDING.value, index=True)
+    timestamp = Column(DateTime, default=TimeUtils.now_uzb, index=True)
+    expires_at = Column(DateTime)
+    executed_at = Column(DateTime)
+    
+    # Indexes for performance
+    __table_args__ = (
+        Index('idx_signal_symbol_timestamp', 'symbol', 'timestamp'),
+        Index('idx_signal_status_timestamp', 'status', 'timestamp'),
+        Index('idx_signal_expires', 'expires_at'),
+    )
+
+class Trade(Base):
+    """Trade modeli"""
+    __tablename__ = 'trades'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    trade_id = Column(String(36), unique=True, default=lambda: str(uuid.uuid4()))
+    signal_id = Column(String(36), index=True)  # Foreign key to signal
+    symbol = Column(String(20), nullable=False, index=True)
+    side = Column(String(10), nullable=False)  # BUY, SELL
+    entry_price = Column(Float, nullable=False)
+    exit_price = Column(Float)
+    quantity = Column(Float, nullable=False)
+    stop_loss = Column(Float)
+    take_profit = Column(Float)
+    pnl = Column(Float, default=0.0)
+    pnl_percentage = Column(Float, default=0.0)
+    fees = Column(Float, default=0.0)
+    status = Column(String(20), default=TradeStatus.OPEN.value, index=True)
+    
+    # Timestamps
+    opened_at = Column(DateTime, default=TimeUtils.now_uzb, index=True)
+    closed_at = Column(DateTime)
+    
+    # Trade metadata
+    strategy = Column(String(50))  # ICT, SMT, etc.
+    notes = Column(Text)
+    metadata = Column(JSON)
+    
+    # Indexes
+    __table_args__ = (
+        Index('idx_trade_symbol_opened', 'symbol', 'opened_at'),
+        Index('idx_trade_status_opened', 'status', 'opened_at'),
+        Index('idx_trade_signal', 'signal_id'),
+    )
+
 class BotState(Base):
     """Bot holati modeli"""
-    __tablename__ = "bot_state"
+    __tablename__ = 'bot_states'
     
-    id = Column(Integer, primary_key=True)
-    status = Column(String(50), nullable=False)
-    signal_mode = Column(String(50), nullable=False)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    status = Column(String(20), nullable=False)
+    signal_mode = Column(String(20), nullable=False)
     auto_trading = Column(Boolean, default=False)
     total_signals = Column(Integer, default=0)
     executed_trades = Column(Integer, default=0)
@@ -63,455 +130,505 @@ class BotState(Base):
     total_pnl = Column(Float, default=0.0)
     daily_stop_count = Column(Integer, default=0)
     last_update = Column(DateTime, default=TimeUtils.now_uzb)
-    settings = Column(JSON, default={})
-
-class TradingSignal(Base):
-    """Trading signali modeli"""
-    __tablename__ = "trading_signals"
     
-    id = Column(Integer, primary_key=True)
-    signal_id = Column(String(100), unique=True, nullable=False)
-    symbol = Column(String(20), nullable=False, index=True)
-    type = Column(String(20), nullable=False)
-    action = Column(String(10), nullable=False)
-    entry_price = Column(Float, nullable=False)
-    stop_loss = Column(Float, nullable=False)
-    take_profit_1 = Column(Float)
-    take_profit_2 = Column(Float)
-    take_profit_3 = Column(Float)
-    position_size = Column(Float)
-    risk_reward_ratio = Column(Float)
-    confidence = Column(Float, nullable=False)
-    sources = Column(JSON, default=[])
-    analysis = Column(JSON, default={})
-    reasoning = Column(JSON, default=[])
-    created_at = Column(DateTime, default=TimeUtils.now_uzb, index=True)
-    expires_at = Column(DateTime)
-    executed = Column(Boolean, default=False)
-    
-    # Relationships
-    trades = relationship("Trade", back_populates="signal")
-    
-    __table_args__ = (
-        Index('idx_symbol_created', 'symbol', 'created_at'),
-    )
-
-class Trade(Base):
-    """Savdo modeli"""
-    __tablename__ = "trades"
-    
-    id = Column(Integer, primary_key=True)
-    trade_id = Column(String(100), unique=True, nullable=False)
-    signal_id = Column(String(100), ForeignKey('trading_signals.signal_id'))
-    symbol = Column(String(20), nullable=False, index=True)
-    side = Column(String(10), nullable=False)  # BUY/SELL
-    entry_price = Column(Float, nullable=False)
-    exit_price = Column(Float)
-    position_size = Column(Float, nullable=False)
-    stop_loss = Column(Float)
-    take_profit_1 = Column(Float)
-    take_profit_2 = Column(Float)
-    take_profit_3 = Column(Float)
-    pnl = Column(Float, default=0.0)
-    pnl_percent = Column(Float, default=0.0)
-    commission = Column(Float, default=0.0)
-    status = Column(String(20), default=TradeStatus.PENDING.value, index=True)
-    opened_at = Column(DateTime, default=TimeUtils.now_uzb)
-    closed_at = Column(DateTime)
-    duration_minutes = Column(Integer)
-    exit_reason = Column(String(50))
-    detailed_reason = Column(Text)
-    market_conditions = Column(JSON, default={})
-    
-    # Relationships
-    signal = relationship("TradingSignal", back_populates="trades")
-    orders = relationship("Order", back_populates="trade")
-    analysis = relationship("TradeAnalysis", back_populates="trade", uselist=False)
-    
-    __table_args__ = (
-        Index('idx_symbol_status', 'symbol', 'status'),
-        Index('idx_opened_at', 'opened_at'),
-    )
-
-class Order(Base):
-    """Order modeli"""
-    __tablename__ = "orders"
-    
-    id = Column(Integer, primary_key=True)
-    order_id = Column(String(100), unique=True, nullable=False)
-    trade_id = Column(String(100), ForeignKey('trades.trade_id'))
-    symbol = Column(String(20), nullable=False, index=True)
-    type = Column(String(20), nullable=False)  # OrderType enum
-    side = Column(String(10), nullable=False)
-    price = Column(Float)
-    stop_price = Column(Float)
-    quantity = Column(Float, nullable=False)
-    executed_qty = Column(Float, default=0.0)
-    status = Column(String(20), nullable=False, index=True)
-    commission = Column(Float, default=0.0)
-    created_at = Column(DateTime, default=TimeUtils.now_uzb)
-    updated_at = Column(DateTime, default=TimeUtils.now_uzb, onupdate=TimeUtils.now_uzb)
-    
-    # Relationships
-    trade = relationship("Trade", back_populates="orders")
-
-class TradeAnalysis(Base):
-    """Savdo tahlili modeli"""
-    __tablename__ = "trade_analysis"
-    
-    id = Column(Integer, primary_key=True)
-    trade_id = Column(String(100), ForeignKey('trades.trade_id'), unique=True)
-    symbol = Column(String(20), nullable=False)
-    result = Column(String(20), nullable=False)  # WIN/LOSS/BREAKEVEN
-    pnl = Column(Float, nullable=False)
-    pnl_percent = Column(Float, nullable=False)
-    exit_reason = Column(String(50), nullable=False)
-    detailed_reason = Column(Text)
-    stop_loss_reason = Column(String(50))
-    take_profit_reason = Column(String(50))
-    duration_minutes = Column(Integer)
-    market_conditions = Column(JSON, default={})
-    performance_metrics = Column(JSON, default={})
-    timestamp = Column(DateTime, default=TimeUtils.now_uzb)
-    
-    # Relationships
-    trade = relationship("Trade", back_populates="analysis")
-
-class MarketData(Base):
-    """Bozor ma'lumotlari modeli"""
-    __tablename__ = "market_data"
-    
-    id = Column(Integer, primary_key=True)
-    symbol = Column(String(20), nullable=False, index=True)
-    timeframe = Column(String(10), nullable=False)
-    open = Column(Float, nullable=False)
-    high = Column(Float, nullable=False)
-    low = Column(Float, nullable=False)
-    close = Column(Float, nullable=False)
-    volume = Column(Float, nullable=False)
-    timestamp = Column(DateTime, nullable=False, index=True)
-    indicators = Column(JSON, default={})
-    
-    __table_args__ = (
-        UniqueConstraint('symbol', 'timeframe', 'timestamp'),
-        Index('idx_symbol_timeframe_timestamp', 'symbol', 'timeframe', 'timestamp'),
-    )
-
-class RiskMetrics(Base):
-    """Risk metrikalari modeli"""
-    __tablename__ = "risk_metrics"
-    
-    id = Column(Integer, primary_key=True)
-    date = Column(DateTime, nullable=False, unique=True)
-    total_trades = Column(Integer, default=0)
-    winning_trades = Column(Integer, default=0)
-    losing_trades = Column(Integer, default=0)
-    total_pnl = Column(Float, default=0.0)
-    max_drawdown = Column(Float, default=0.0)
-    sharpe_ratio = Column(Float, default=0.0)
+    # Additional metrics
     win_rate = Column(Float, default=0.0)
-    average_win = Column(Float, default=0.0)
-    average_loss = Column(Float, default=0.0)
-    profit_factor = Column(Float, default=0.0)
-    risk_score = Column(Float, default=50.0)
-    daily_metrics = Column(JSON, default={})
-    created_at = Column(DateTime, default=TimeUtils.now_uzb)
+    avg_profit = Column(Float, default=0.0)
+    avg_loss = Column(Float, default=0.0)
+    max_drawdown = Column(Float, default=0.0)
+
+class PerformanceMetric(Base):
+    """Performance metrics modeli"""
+    __tablename__ = 'performance_metrics'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    metric_name = Column(String(50), nullable=False, index=True)
+    metric_value = Column(Float, nullable=False)
+    timestamp = Column(DateTime, default=TimeUtils.now_uzb, index=True)
+    metadata = Column(JSON)
+    
+    __table_args__ = (
+        Index('idx_metric_name_timestamp', 'metric_name', 'timestamp'),
+    )
+
+class APILog(Base):
+    """API call logs"""
+    __tablename__ = 'api_logs'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    provider = Column(String(50), nullable=False, index=True)
+    endpoint = Column(String(200))
+    method = Column(String(10), default='GET')
+    status_code = Column(Integer)
+    response_time_ms = Column(Float)
+    error_message = Column(Text)
+    timestamp = Column(DateTime, default=TimeUtils.now_uzb, index=True)
+    
+    __table_args__ = (
+        Index('idx_api_provider_timestamp', 'provider', 'timestamp'),
+    )
 
 class DatabaseManager:
-    """Database boshqaruv klassi"""
-    def __init__(self, database_url: Optional[str] = None):
-        self.database_url = database_url or "sqlite+aiosqlite:///data/signalbot.db"
-        self.engine = None
-        self.async_session = None
+    """Advanced Database Manager with connection pooling"""
+    
+    def __init__(self):
+        self.engine: Optional[AsyncEngine] = None
+        self.async_session_factory: Optional[async_sessionmaker] = None
+        self._initialized = False
+        self._connection_retries = 3
+        self._pool_size = 10
+        self._max_overflow = 20
         
-    async def initialize(self):
+        # Performance monitoring
+        self._query_count = 0
+        self._slow_query_threshold = 1.0  # seconds
+        
+    async def initialize(self, database_url: Optional[str] = None) -> bool:
         """Database ni sozlash"""
         try:
-            logger.info("Database initialization boshlandi...")
+            if self._initialized:
+                logger.warning("Database already initialized")
+                return True
+                
+            # Get database URL
+            if not database_url:
+                database_url = self._get_database_url()
+                
+            logger.info(f"🔄 Database initializing: {database_url.split('://')[0]}://...")
             
-            # Create async engine
-            self.engine = create_async_engine(
-                self.database_url,
-                echo=False,
-                poolclass=NullPool
-            )
+            # Create engine with connection pooling
+            self.engine = await self._create_engine(database_url)
             
             # Create session factory
-            self.async_session = async_sessionmaker(
-                self.engine,
+            self.async_session_factory = async_sessionmaker(
+                bind=self.engine,
                 class_=AsyncSession,
                 expire_on_commit=False
             )
             
             # Create tables
-            async with self.engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
-                
-            logger.info("✅ Database initialization tugadi")
+            await self._create_tables()
+            
+            # Setup event listeners
+            self._setup_event_listeners()
+            
+            # Test connection
+            await self._test_connection()
+            
+            self._initialized = True
+            logger.info("✅ Database initialized successfully")
             return True
             
         except Exception as e:
-            logger.error(f"Database initialization xatosi: {e}")
+            logger.error(f"❌ Database initialization failed: {e}")
             return False
+    
+    def _get_database_url(self) -> str:
+        """Database URL ni olish"""
+        import os
+        
+        database_url = os.getenv('DATABASE_URL')
+        if database_url:
+            return database_url
             
+        # Default SQLite
+        db_path = Path("data/signalbot.db")
+        db_path.parent.mkdir(exist_ok=True)
+        return f"sqlite+aiosqlite:///{db_path}"
+    
+    async def _create_engine(self, database_url: str) -> AsyncEngine:
+        """Engine yaratish with optimized settings"""
+        
+        if database_url.startswith('sqlite'):
+            # SQLite configuration
+            engine = create_async_engine(
+                database_url,
+                poolclass=StaticPool,
+                connect_args={
+                    "check_same_thread": False,
+                    "timeout": 30,
+                },
+                echo=False,  # Set to True for SQL debugging
+                future=True
+            )
+            
+            # SQLite optimization
+            @event.listens_for(engine.sync_engine, "connect")
+            def set_sqlite_pragma(dbapi_connection, connection_record):
+                cursor = dbapi_connection.cursor()
+                # Performance optimizations
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA synchronous=NORMAL") 
+                cursor.execute("PRAGMA cache_size=10000")
+                cursor.execute("PRAGMA temp_store=memory")
+                cursor.execute("PRAGMA mmap_size=268435456")  # 256MB
+                cursor.close()
+                
+        else:
+            # PostgreSQL configuration
+            engine = create_async_engine(
+                database_url,
+                poolclass=QueuePool,
+                pool_size=self._pool_size,
+                max_overflow=self._max_overflow,
+                pool_pre_ping=True,
+                pool_recycle=3600,  # 1 hour
+                echo=False,
+                future=True
+            )
+        
+        return engine
+    
+    async def _create_tables(self):
+        """Tabllarni yaratish"""
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("✅ Database tables created/verified")
+    
+    def _setup_event_listeners(self):
+        """Event listeners ni o'rnatish"""
+        from sqlalchemy import event
+        
+        @event.listens_for(self.engine.sync_engine, "before_cursor_execute")
+        def receive_before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+            context._query_start_time = datetime.now()
+            self._query_count += 1
+        
+        @event.listens_for(self.engine.sync_engine, "after_cursor_execute") 
+        def receive_after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+            total = (datetime.now() - context._query_start_time).total_seconds()
+            if total > self._slow_query_threshold:
+                logger.warning(f"Slow query detected: {total:.2f}s - {statement[:100]}...")
+    
+    async def _test_connection(self):
+        """Connection ni test qilish"""
+        async with self.get_session() as session:
+            result = await session.execute(select(1))
+            result.scalar()
+        logger.info("✅ Database connection test passed")
+    
+    async def get_session(self) -> AsyncSession:
+        """Async session olish"""
+        if not self._initialized:
+            raise RuntimeError("Database not initialized")
+        return self.async_session_factory()
+    
     async def close(self):
-        """Database yopish"""
+        """Database connection ni yopish"""
         if self.engine:
             await self.engine.dispose()
-            
-    # Bot State operations
+            logger.info("✅ Database connections closed")
+    
+    # Signal Operations
+    async def save_signal(self, signal: TradingSignal) -> bool:
+        """Signal saqlash"""
+        try:
+            async with self.get_session() as session:
+                session.add(signal)
+                await session.commit()
+                logger.debug(f"Signal saved: {signal.symbol} - {signal.action}")
+                return True
+        except IntegrityError:
+            logger.warning(f"Signal already exists: {signal.signal_id}")
+            return False
+        except Exception as e:
+            logger.error(f"Signal save error: {e}")
+            return False
+    
+    async def get_active_signals(self, symbol: Optional[str] = None) -> List[TradingSignal]:
+        """Aktiv signallarni olish"""
+        try:
+            async with self.get_session() as session:
+                query = select(TradingSignal).where(
+                    TradingSignal.status == SignalStatus.PENDING.value
+                )
+                
+                if symbol:
+                    query = query.where(TradingSignal.symbol == symbol)
+                
+                query = query.order_by(desc(TradingSignal.timestamp))
+                result = await session.execute(query)
+                return result.scalars().all()
+        except Exception as e:
+            logger.error(f"Get active signals error: {e}")
+            return []
+    
+    async def update_signal_status(self, signal_id: str, status: SignalStatus, 
+                                 executed_at: Optional[datetime] = None) -> bool:
+        """Signal statusini yangilash"""
+        try:
+            async with self.get_session() as session:
+                query = update(TradingSignal).where(
+                    TradingSignal.signal_id == signal_id
+                ).values(
+                    status=status.value,
+                    executed_at=executed_at or TimeUtils.now_uzb()
+                )
+                
+                await session.execute(query)
+                await session.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Update signal status error: {e}")
+            return False
+    
+    # Trade Operations
+    async def save_trade(self, trade: Trade) -> bool:
+        """Trade saqlash"""
+        try:
+            async with self.get_session() as session:
+                session.add(trade)
+                await session.commit()
+                logger.info(f"Trade saved: {trade.symbol} - {trade.side}")
+                return True
+        except Exception as e:
+            logger.error(f"Trade save error: {e}")
+            return False
+    
+    async def get_open_trades(self, symbol: Optional[str] = None) -> List[Trade]:
+        """Ochiq tradelarni olish"""
+        try:
+            async with self.get_session() as session:
+                query = select(Trade).where(Trade.status == TradeStatus.OPEN.value)
+                
+                if symbol:
+                    query = query.where(Trade.symbol == symbol)
+                
+                query = query.order_by(desc(Trade.opened_at))
+                result = await session.execute(query)
+                return result.scalars().all()
+        except Exception as e:
+            logger.error(f"Get open trades error: {e}")
+            return []
+    
+    async def close_trade(self, trade_id: str, exit_price: float, 
+                         pnl: float, fees: float = 0.0) -> bool:
+        """Trade yopish"""
+        try:
+            async with self.get_session() as session:
+                # Calculate PnL percentage
+                trade_query = select(Trade).where(Trade.trade_id == trade_id)
+                result = await session.execute(trade_query)
+                trade = result.scalar_one_or_none()
+                
+                if not trade:
+                    logger.error(f"Trade not found: {trade_id}")
+                    return False
+                
+                pnl_percentage = ((exit_price - trade.entry_price) / trade.entry_price) * 100
+                if trade.side == "SELL":
+                    pnl_percentage = -pnl_percentage
+                
+                # Update trade
+                update_query = update(Trade).where(
+                    Trade.trade_id == trade_id
+                ).values(
+                    exit_price=exit_price,
+                    pnl=pnl,
+                    pnl_percentage=pnl_percentage,
+                    fees=fees,
+                    status=TradeStatus.CLOSED.value,
+                    closed_at=TimeUtils.now_uzb()
+                )
+                
+                await session.execute(update_query)
+                await session.commit()
+                
+                logger.info(f"Trade closed: {trade_id} - PnL: {pnl:+.2f}")
+                return True
+        except Exception as e:
+            logger.error(f"Close trade error: {e}")
+            return False
+    
+    # Bot State Operations
+    async def save_bot_state(self, state: BotState) -> bool:
+        """Bot holatini saqlash"""
+        try:
+            async with self.get_session() as session:
+                # Delete old state (keep only latest)
+                await session.execute(delete(BotState))
+                
+                # Save new state
+                session.add(state)
+                await session.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Save bot state error: {e}")
+            return False
+    
     async def get_bot_state(self) -> Optional[BotState]:
         """Bot holatini olish"""
-        async with self.async_session() as session:
-            result = await session.execute(select(BotState).order_by(desc(BotState.id)).limit(1))
-            return result.scalar_one_or_none()
-            
-    async def save_bot_state(self, state: BotState):
-        """Bot holatini saqlash"""
-        async with self.async_session() as session:
-            session.add(state)
-            await session.commit()
-            
-    # Signal operations
-    async def save_signal(self, signal: TradingSignal):
-        """Signalni saqlash"""
-        async with self.async_session() as session:
-            session.add(signal)
-            await session.commit()
-            
-    async def get_active_signals(self) -> List[TradingSignal]:
-        """Aktiv signallarni olish"""
-        async with self.async_session() as session:
-            now = TimeUtils.now_uzb()
-            result = await session.execute(
-                select(TradingSignal)
-                .where(
-                    and_(
-                        TradingSignal.executed == False,
-                        or_(
-                            TradingSignal.expires_at == None,
-                            TradingSignal.expires_at > now
-                        )
-                    )
+        try:
+            async with self.get_session() as session:
+                query = select(BotState).order_by(desc(BotState.last_update)).limit(1)
+                result = await session.execute(query)
+                return result.scalar_one_or_none()
+        except Exception as e:
+            logger.error(f"Get bot state error: {e}")
+            return None
+    
+    # Performance Metrics
+    async def save_metric(self, name: str, value: float, metadata: Optional[Dict] = None) -> bool:
+        """Performance metric saqlash"""
+        try:
+            async with self.get_session() as session:
+                metric = PerformanceMetric(
+                    metric_name=name,
+                    metric_value=value,
+                    metadata=metadata
                 )
-                .order_by(desc(TradingSignal.created_at))
-            )
-            return result.scalars().all()
-            
-    async def get_signals_by_symbol(self, symbol: str, limit: int = 50) -> List[TradingSignal]:
-        """Symbol bo'yicha signallarni olish"""
-        async with self.async_session() as session:
-            result = await session.execute(
-                select(TradingSignal)
-                .where(TradingSignal.symbol == symbol)
-                .order_by(desc(TradingSignal.created_at))
-                .limit(limit)
-            )
-            return result.scalars().all()
-            
-    # Trade operations
-    async def save_trade(self, trade: Trade):
-        """Savdoni saqlash"""
-        async with self.async_session() as session:
-            session.add(trade)
-            await session.commit()
-            
-    async def update_trade(self, trade_id: str, updates: Dict[str, Any]):
-        """Savdoni yangilash"""
-        async with self.async_session() as session:
-            result = await session.execute(
-                select(Trade).where(Trade.trade_id == trade_id)
-            )
-            trade = result.scalar_one_or_none()
-            
-            if trade:
-                for key, value in updates.items():
-                    setattr(trade, key, value)
+                session.add(metric)
                 await session.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Save metric error: {e}")
+            return False
+    
+    async def get_metrics(self, name: str, hours: int = 24) -> List[PerformanceMetric]:
+        """Metrikkalarni olish"""
+        try:
+            since = TimeUtils.now_uzb() - timedelta(hours=hours)
+            
+            async with self.get_session() as session:
+                query = select(PerformanceMetric).where(
+                    and_(
+                        PerformanceMetric.metric_name == name,
+                        PerformanceMetric.timestamp >= since
+                    )
+                ).order_by(PerformanceMetric.timestamp)
                 
-    async def get_open_trades(self) -> List[Trade]:
-        """Ochiq savdolarni olish"""
-        async with self.async_session() as session:
-            result = await session.execute(
-                select(Trade)
-                .where(Trade.status == TradeStatus.OPEN.value)
-                .order_by(desc(Trade.opened_at))
-            )
-            return result.scalars().all()
-            
-    async def get_trades_by_symbol(self, symbol: str, status: Optional[str] = None) -> List[Trade]:
-        """Symbol bo'yicha savdolarni olish"""
-        async with self.async_session() as session:
-            query = select(Trade).where(Trade.symbol == symbol)
-            
-            if status:
-                query = query.where(Trade.status == status)
-                
-            query = query.order_by(desc(Trade.opened_at))
-            
-            result = await session.execute(query)
-            return result.scalars().all()
-            
-    async def get_trades_after(self, after_date: datetime) -> List[Trade]:
-        """Sanadan keyingi savdolarni olish"""
-        async with self.async_session() as session:
-            result = await session.execute(
-                select(Trade)
-                .where(Trade.opened_at > after_date)
-                .order_by(desc(Trade.opened_at))
-            )
-            return result.scalars().all()
-            
-    # Order operations
-    async def save_order(self, order: Order):
-        """Orderni saqlash"""
-        async with self.async_session() as session:
-            session.add(order)
-            await session.commit()
-            
-    async def update_order(self, order_id: str, updates: Dict[str, Any]):
-        """Orderni yangilash"""
-        async with self.async_session() as session:
-            result = await session.execute(
-                select(Order).where(Order.order_id == order_id)
-            )
-            order = result.scalar_one_or_none()
-            
-            if order:
-                for key, value in updates.items():
-                    setattr(order, key, value)
-                order.updated_at = TimeUtils.now_uzb()
+                result = await session.execute(query)
+                return result.scalars().all()
+        except Exception as e:
+            logger.error(f"Get metrics error: {e}")
+            return []
+    
+    # API Logging
+    async def log_api_call(self, provider: str, endpoint: str, method: str = "GET",
+                          status_code: Optional[int] = None, response_time_ms: Optional[float] = None,
+                          error_message: Optional[str] = None) -> bool:
+        """API call logini saqlash"""
+        try:
+            async with self.get_session() as session:
+                api_log = APILog(
+                    provider=provider,
+                    endpoint=endpoint,
+                    method=method,
+                    status_code=status_code,
+                    response_time_ms=response_time_ms,
+                    error_message=error_message
+                )
+                session.add(api_log)
                 await session.commit()
+                return True
+        except Exception as e:
+            logger.error(f"API log save error: {e}")
+            return False
+    
+    # Analytics and Reports
+    async def get_trade_statistics(self, days: int = 30) -> Dict[str, Any]:
+        """Trading statistikasi"""
+        try:
+            since = TimeUtils.now_uzb() - timedelta(days=days)
+            
+            async with self.get_session() as session:
+                # Basic stats
+                stats_query = select(
+                    func.count(Trade.id).label('total_trades'),
+                    func.count(Trade.id).filter(Trade.pnl > 0).label('winning_trades'),
+                    func.sum(Trade.pnl).label('total_pnl'),
+                    func.avg(Trade.pnl).label('avg_pnl'),
+                    func.max(Trade.pnl).label('max_profit'),
+                    func.min(Trade.pnl).label('max_loss'),
+                    func.sum(Trade.fees).label('total_fees')
+                ).where(
+                    and_(
+                        Trade.status == TradeStatus.CLOSED.value,
+                        Trade.closed_at >= since
+                    )
+                )
                 
-    async def get_orders_by_trade(self, trade_id: str) -> List[Order]:
-        """Savdo bo'yicha orderlarni olish"""
-        async with self.async_session() as session:
-            result = await session.execute(
-                select(Order)
-                .where(Order.trade_id == trade_id)
-                .order_by(desc(Order.created_at))
-            )
-            return result.scalars().all()
-            
-    # Trade Analysis operations
-    async def save_trade_analysis(self, analysis: TradeAnalysis):
-        """Savdo tahlilini saqlash"""
-        async with self.async_session() as session:
-            session.add(analysis)
-            await session.commit()
-            
-    async def get_trade_analysis(self, trade_id: str) -> Optional[TradeAnalysis]:
-        """Savdo tahlilini olish"""
-        async with self.async_session() as session:
-            result = await session.execute(
-                select(TradeAnalysis).where(TradeAnalysis.trade_id == trade_id)
-            )
-            return result.scalar_one_or_none()
-            
-    # Market Data operations
-    async def save_market_data(self, data: MarketData):
-        """Bozor ma'lumotlarini saqlash"""
-        async with self.async_session() as session:
-            session.add(data)
-            await session.commit()
-            
-    async def save_market_data_bulk(self, data_list: List[MarketData]):
-        """Ko'p bozor ma'lumotlarini saqlash"""
-        async with self.async_session() as session:
-            session.add_all(data_list)
-            await session.commit()
-            
-    async def get_market_data(self, symbol: str, timeframe: str, 
-                            start_time: datetime, end_time: datetime) -> List[MarketData]:
-        """Bozor ma'lumotlarini olish"""
-        async with self.async_session() as session:
-            result = await session.execute(
-                select(MarketData)
-                .where(
+                result = await session.execute(stats_query)
+                stats = result.first()
+                
+                if not stats or stats.total_trades == 0:
+                    return {"message": "No trades found"}
+                
+                win_rate = (stats.winning_trades / stats.total_trades) * 100
+                
+                # Symbol breakdown
+                symbol_query = select(
+                    Trade.symbol,
+                    func.count(Trade.id).label('count'),
+                    func.sum(Trade.pnl).label('pnl')
+                ).where(
                     and_(
-                        MarketData.symbol == symbol,
-                        MarketData.timeframe == timeframe,
-                        MarketData.timestamp >= start_time,
-                        MarketData.timestamp <= end_time
+                        Trade.status == TradeStatus.CLOSED.value,
+                        Trade.closed_at >= since
                     )
-                )
-                .order_by(asc(MarketData.timestamp))
-            )
-            return result.scalars().all()
-            
-    # Risk Metrics operations
-    async def save_risk_metrics(self, metrics: RiskMetrics):
-        """Risk metrikalarini saqlash"""
-        async with self.async_session() as session:
-            session.add(metrics)
-            await session.commit()
-            
-    async def get_latest_risk_metrics(self) -> Optional[RiskMetrics]:
-        """Oxirgi risk metrikalarini olish"""
-        async with self.async_session() as session:
-            result = await session.execute(
-                select(RiskMetrics).order_by(desc(RiskMetrics.date)).limit(1)
-            )
-            return result.scalar_one_or_none()
-            
-    async def get_risk_metrics_range(self, start_date: datetime, end_date: datetime) -> List[RiskMetrics]:
-        """Vaqt oralig'idagi risk metrikalarini olish"""
-        async with self.async_session() as session:
-            result = await session.execute(
-                select(RiskMetrics)
-                .where(
-                    and_(
-                        RiskMetrics.date >= start_date,
-                        RiskMetrics.date <= end_date
-                    )
-                )
-                .order_by(asc(RiskMetrics.date))
-            )
-            return result.scalars().all()
-            
-    # Statistics
-    async def get_trading_statistics(self, days: int = 30) -> Dict[str, Any]:
-        """Trading statistikalarini olish"""
-        async with self.async_session() as session:
-            start_date = TimeUtils.now_uzb() - timedelta(days=days)
-            
-            # Get trades
-            result = await session.execute(
-                select(Trade)
-                .where(
-                    and_(
-                        Trade.opened_at >= start_date,
-                        Trade.status == TradeStatus.CLOSED.value
-                    )
-                )
-            )
-            trades = result.scalars().all()
-            
-            if not trades:
+                ).group_by(Trade.symbol).order_by(desc('pnl'))
+                
+                symbol_result = await session.execute(symbol_query)
+                symbols = [
+                    {"symbol": row.symbol, "trades": row.count, "pnl": float(row.pnl)}
+                    for row in symbol_result
+                ]
+                
                 return {
-                    "total_trades": 0,
-                    "winning_trades": 0,
-                    "losing_trades": 0,
-                    "win_rate": 0,
-                    "total_pnl": 0,
-                    "avg_win": 0,
-                    "avg_loss": 0,
-                    "profit_factor": 0
+                    "period_days": days,
+                    "total_trades": stats.total_trades,
+                    "winning_trades": stats.winning_trades,
+                    "win_rate": round(win_rate, 2),
+                    "total_pnl": round(float(stats.total_pnl), 2),
+                    "avg_pnl": round(float(stats.avg_pnl), 2),
+                    "max_profit": round(float(stats.max_profit), 2),
+                    "max_loss": round(float(stats.max_loss), 2),
+                    "total_fees": round(float(stats.total_fees), 2),
+                    "symbols": symbols
                 }
                 
-            winning_trades = [t for t in trades if t.pnl > 0]
-            losing_trades = [t for t in trades if t.pnl < 0]
+        except Exception as e:
+            logger.error(f"Get trade statistics error: {e}")
+            return {"error": str(e)}
+    
+    async def cleanup_old_data(self, days: int = 90) -> bool:
+        """Eski ma'lumotlarni tozalash"""
+        try:
+            cutoff_date = TimeUtils.now_uzb() - timedelta(days=days)
             
-            total_wins = sum(t.pnl for t in winning_trades)
-            total_losses = abs(sum(t.pnl for t in losing_trades))
-            
-            return {
-                "total_trades": len(trades),
-                "winning_trades": len(winning_trades),
-                "losing_trades": len(losing_trades),
-                "win_rate": (len(winning_trades) / len(trades) * 100) if trades else 0,
-                "total_pnl": sum(t.pnl for t in trades),
-                "avg_win": (total_wins / len(winning_trades)) if winning_trades else 0,
-                "avg_loss": (total_losses / len(losing_trades)) if losing_trades else 0,
-                "profit_factor": (total_wins / total_losses) if total_losses > 0 else 0
-            }
+            async with self.get_session() as session:
+                # Clean old signals
+                await session.execute(
+                    delete(TradingSignal).where(TradingSignal.timestamp < cutoff_date)
+                )
+                
+                # Clean old metrics
+                await session.execute(
+                    delete(PerformanceMetric).where(PerformanceMetric.timestamp < cutoff_date)
+                )
+                
+                # Clean old API logs
+                await session.execute(
+                    delete(APILog).where(APILog.timestamp < cutoff_date)
+                )
+                
+                await session.commit()
+                logger.info(f"✅ Cleaned data older than {days} days")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Cleanup error: {e}")
+            return False
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Database statistikasi"""
+        return {
+            "initialized": self._initialized,
+            "query_count": self._query_count,
+            "pool_size": self._pool_size,
+            "max_overflow": self._max_overflow,
+            "connection_retries": self._connection_retries
+        }
+
+# Global instance
+database_manager = DatabaseManager()
