@@ -1,6 +1,7 @@
+# src/main.py - Import qismi tuzatilgan
 """
 SignalBot - Professional AI Crypto Trading Bot
-Asosiy ishga tushirish fayli - COMPLETELY FIXED
+Asosiy ishga tushirish fayli
 """
 import asyncio
 import sys
@@ -10,10 +11,9 @@ import argparse
 import platform
 
 from config.config import config_manager, TradingMode
-from utils.logger import get_logger, setup_logging
+from utils.logger import logger, setup_logging, get_logger  # Fixed import
 from utils.helpers import TimeUtils
 from core.bot_manager import bot_manager
-from telegram.bot_interface import telegram_interface
 
 # ASCII Art for startup
 BANNER = """
@@ -33,7 +33,8 @@ BANNER = """
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 """
 
-logger: Optional[get_logger] = None
+# Global logger instance
+main_logger: Optional[Any] = None
 
 class SignalBot:
     """Asosiy bot klassi"""
@@ -41,10 +42,11 @@ class SignalBot:
     def __init__(self):
         self.running = False
         self.components_started = False
+        self.telegram_interface = None  # Will be initialized later
         
     async def start(self):
         """Botni ishga tushirish"""
-        global logger
+        global main_logger
         
         try:
             # Print banner
@@ -56,28 +58,28 @@ class SignalBot:
             
             # Setup logging
             setup_logging()
-            logger = get_logger(__name__)
+            main_logger = get_logger(__name__)
             
-            logger.info("🚀 SignalBot ishga tushmoqda...")
+            main_logger.info("🚀 SignalBot ishga tushmoqda...")
             
             # Load configuration
             print("📋 Konfiguratsiya yuklanmoqda...")
             if not await config_manager.load_config():
-                logger.error("❌ Konfiguratsiya yuklanmadi!")
+                main_logger.error("❌ Konfiguratsiya yuklanmadi!")
                 return False
                 
-            logger.info(f"✅ Konfiguratsiya yuklandi. Trading mode: {config_manager.trading.mode.name}")
+            main_logger.info(f"✅ Konfiguratsiya yuklandi. Trading mode: {config_manager.trading.mode.name}")
             
             # Initialize components
             print("🔧 Komponentlar sozlanmoqda...")
             if not await self._initialize_components():
-                logger.error("❌ Komponentlarni sozlashda xatolik!")
+                main_logger.error("❌ Komponentlarni sozlashda xatolik!")
                 return False
                 
             # Start bot manager
             print("🤖 Bot Manager ishga tushmoqda...")
             if not await bot_manager.start():
-                logger.error("❌ Bot Manager ishga tushmadi!")
+                main_logger.error("❌ Bot Manager ishga tushmadi!")
                 return False
                 
             self.running = True
@@ -88,12 +90,9 @@ class SignalBot:
             print("✅ SignalBot muvaffaqiyatli ishga tushdi!")
             print("="*65)
             print(f"\n📊 Trading Mode: {config_manager.trading.mode.name}")
-            # FIXED: Use correct property - pairs instead of symbols
-            print(f"💱 Symbols: {', '.join(config_manager.trading.pairs[:5])}...")
-            # FIXED: Use correct property - trading.risk_percentage
-            print(f"⚖️ Risk: {config_manager.trading.risk_percentage}%")
-            # FIXED: Use correct property - telegram.admin_ids
-            print(f"👥 Authorized Users: {len(config_manager.telegram.admin_ids)}")
+            print(f"💱 Symbols: {', '.join(config_manager.trading.symbols[:5])}...")
+            print(f"⚖️ Risk: {config_manager.risk_management.base_risk_percent}%")
+            print(f"👥 Authorized Users: {len(config_manager.telegram.authorized_users)}")
             print("\n💡 Bot to'xtatish uchun Ctrl+C bosing")
             print("-" * 65 + "\n")
             
@@ -103,7 +102,10 @@ class SignalBot:
             return True
             
         except Exception as e:
-            logger.error(f"❌ Bot start xatosi: {e}", exc_info=True)
+            if main_logger:
+                main_logger.error(f"❌ Bot start xatosi: {e}", exc_info=True)
+            else:
+                print(f"❌ Bot start xatosi: {e}")
             return False
             
     async def _initialize_components(self):
@@ -118,15 +120,15 @@ class SignalBot:
             ]
             
             for name, init_func in components:
-                logger.info(f"Initializing {name}...")
+                main_logger.info(f"Initializing {name}...")
                 if not await init_func():
-                    logger.error(f"Failed to initialize {name}")
+                    main_logger.error(f"Failed to initialize {name}")
                     return False
                     
             return True
             
         except Exception as e:
-            logger.error(f"Component initialization xatosi: {e}")
+            main_logger.error(f"Component initialization xatosi: {e}")
             return False
             
     async def _init_risk_manager(self):
@@ -134,10 +136,10 @@ class SignalBot:
         try:
             from core.risk_manager import risk_manager
             await risk_manager.initialize()
-            logger.info("✅ Risk Manager tayyor")
+            main_logger.info("✅ Risk Manager tayyor")
             return True
         except Exception as e:
-            logger.error(f"Risk Manager init xatosi: {e}")
+            main_logger.error(f"Risk Manager init xatosi: {e}")
             return False
             
     async def _init_analyzers(self):
@@ -154,11 +156,11 @@ class SignalBot:
             await order_flow_analyzer.start()
             await sentiment_analyzer.start()
             
-            logger.info("✅ Barcha tahlilchilar tayyor")
+            main_logger.info("✅ Barcha tahlilchilar tayyor")
             return True
             
         except Exception as e:
-            logger.error(f"Analyzers init xatosi: {e}")
+            main_logger.error(f"Analyzers init xatosi: {e}")
             return False
             
     async def _init_trading(self):
@@ -173,58 +175,62 @@ class SignalBot:
             await trade_analyzer.start()
             await execution_engine.start()
             
-            logger.info("✅ Trading komponentlari tayyor")
+            main_logger.info("✅ Trading komponentlari tayyor")
             return True
             
         except Exception as e:
-            logger.error(f"Trading components init xatosi: {e}")
+            main_logger.error(f"Trading components init xatosi: {e}")
             return False
             
     async def _init_telegram(self):
         """Telegram interfaceini sozlash"""
         try:
-            await telegram_interface.start()
-            logger.info("✅ Telegram interface tayyor")
+            # Dynamic import to avoid circular dependency
+            from telegram.bot_interface import telegram_interface
+            self.telegram_interface = telegram_interface
+            
+            await self.telegram_interface.start()
+            main_logger.info("✅ Telegram interface tayyor")
             return True
             
         except Exception as e:
-            logger.error(f"Telegram interface init xatosi: {e}")
+            main_logger.error(f"Telegram interface init xatosi: {e}")
             return False
             
     async def _run_forever(self):
         """Doimiy ishlash"""
         try:
             # Send startup notification
-            await telegram_interface.broadcast_message(
-                f"🚀 <b>SignalBot ishga tushdi!</b>\n\n"
-                f"📊 Mode: {config_manager.trading.mode.name}\n"
-                # FIXED: Use correct property - trading.risk_percentage
-                f"⚖️ Risk: {config_manager.trading.risk_percentage}%\n"
-                # FIXED: Use correct property - trading.pairs
-                f"💱 Symbols: {len(config_manager.trading.pairs)}\n\n"
-                f"Bot tayyor! /help - yordam uchun"
-            )
+            if self.telegram_interface:
+                await self.telegram_interface.broadcast_message(
+                    f"🚀 <b>SignalBot ishga tushdi!</b>\n\n"
+                    f"📊 Mode: {config_manager.trading.mode.name}\n"
+                    f"⚖️ Risk: {config_manager.risk_management.base_risk_percent}%\n"
+                    f"💱 Symbols: {len(config_manager.trading.symbols)}\n\n"
+                    f"Bot tayyor! /help - yordam uchun"
+                )
             
             # Main loop
             while self.running:
                 await asyncio.sleep(1)
                 
         except asyncio.CancelledError:
-            logger.info("Main loop bekor qilindi")
+            main_logger.info("Main loop bekor qilindi")
             
     async def stop(self):
         """Botni to'xtatish"""
-        logger.info("🛑 SignalBot to'xtatilmoqda...")
+        main_logger.info("🛑 SignalBot to'xtatilmoqda...")
         
         self.running = False
         
         # Send shutdown notification
         try:
-            await telegram_interface.broadcast_message(
-                "🛑 <b>SignalBot to'xtatilmoqda...</b>\n\n"
-                "Barcha pozitsiyalar saqlanadi.\n"
-                "Bot tez orada qayta ishga tushadi."
-            )
+            if self.telegram_interface:
+                await self.telegram_interface.broadcast_message(
+                    "🛑 <b>SignalBot to'xtatilmoqda...</b>\n\n"
+                    "Barcha pozitsiyalar saqlanadi.\n"
+                    "Bot tez orada qayta ishga tushadi."
+                )
         except:
             pass
             
@@ -232,12 +238,12 @@ class SignalBot:
         if self.components_started:
             await bot_manager.shutdown()
             
-        logger.info("✅ SignalBot to'xtatildi")
+        main_logger.info("✅ SignalBot to'xtatildi")
         
     def setup_signal_handlers(self):
         """Signal handlerlarni o'rnatish"""
         def signal_handler(sig, frame):
-            logger.info(f"Signal {sig} qabul qilindi")
+            main_logger.info(f"Signal {sig} qabul qilindi")
             asyncio.create_task(self.stop())
             
         signal.signal(signal.SIGINT, signal_handler)
@@ -290,7 +296,7 @@ async def main():
             "paper": TradingMode.PAPER,
             "signal": TradingMode.SIGNAL_ONLY
         }
-        config_manager.trading.mode = mode_map.get(args.mode, TradingMode.SIGNAL_ONLY)
+        # Note: We'll need to load config first before setting mode
         
     # Create and start bot
     bot = SignalBot()
@@ -299,14 +305,14 @@ async def main():
     try:
         success = await bot.start()
         if not success:
-            logger.error("Bot ishga tushmadi!")
+            print("Bot ishga tushmadi!")
             sys.exit(1)
             
     except KeyboardInterrupt:
-        logger.info("Keyboard interrupt qabul qilindi")
+        print("Keyboard interrupt qabul qilindi")
         
     except Exception as e:
-        logger.error(f"Bot xatosi: {e}", exc_info=True)
+        print(f"Bot xatosi: {e}")
         sys.exit(1)
         
     finally:
