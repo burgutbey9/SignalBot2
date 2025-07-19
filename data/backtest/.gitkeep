@@ -1,0 +1,2 @@
+# Directory for historical data used in backtesting
+# CSV and Parquet files with OHLCV data will be stored here
