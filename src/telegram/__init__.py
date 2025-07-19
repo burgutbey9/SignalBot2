@@ -1,36 +1,22 @@
+# src/telegram/__init__.py
 """
-Telegram Module
-Bot interface and message handling
+Telegram bot interface module
 """
 
-from .bot_interface import (
-    TelegramBot,
-    BotCommand,
-    CallbackHandler,
-    UserSession,
-    BotContext
-)
+# Lazy import to avoid circular dependencies
+_telegram_interface = None
 
-from .message_handler import (
-    MessageHandler,
-    SignalFormatter,
-    NotificationBuilder,
-    ReportGenerator,
-    ControlPanelBuilder
-)
+def get_telegram_interface():
+    """Get telegram interface instance"""
+    global _telegram_interface
+    if _telegram_interface is None:
+        from .bot_interface import TelegramInterface
+        _telegram_interface = TelegramInterface()
+    return _telegram_interface
 
-__all__ = [
-    # Bot Interface
-    "TelegramBot",
-    "BotCommand",
-    "CallbackHandler",
-    "UserSession",
-    "BotContext",
-    
-    # Message Handler
-    "MessageHandler",
-    "SignalFormatter",
-    "NotificationBuilder",
-    "ReportGenerator",
-    "ControlPanelBuilder"
-]
+# For backward compatibility
+@property
+def telegram_interface():
+    return get_telegram_interface()
+
+__all__ = ["get_telegram_interface", "telegram_interface"]
