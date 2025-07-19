@@ -1,280 +1,260 @@
+# src/utils/logger.py - Tuzatilgan versiya
 """
-Logger Setup and Error Handling
-O'zbekcha log messages, rotating files, structured logging
+Advanced logging system for SignalBot
+Loguru based logger with rotation, monitoring, and Telegram integration
 """
-import logging
 import sys
 import os
-import json
-import traceback
-from typing import Optional, Dict, Any, Union, Callable
-from datetime import datetime
 from pathlib import Path
-from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
-from enum import Enum
+from typing import Optional, Dict, Any
+from datetime import datetime, timedelta
 import asyncio
+import json
 from functools import wraps
 
-class LogLevel(Enum):
-    """Log darajalari"""
-    DEBUG = logging.DEBUG
-    INFO = logging.INFO
-    WARNING = logging.WARNING
-    ERROR = logging.ERROR
-    CRITICAL = logging.CRITICAL
+from loguru import logger
+from config.config import config_manager
+from utils.helpers import TimeUtils
 
-class LogCategory(Enum):
-    """Log kategoriyalari"""
-    BOT = "bot"
-    API = "api"
-    TRADING = "trading"
-    ANALYSIS = "analysis"
-    TELEGRAM = "telegram"
-    SYSTEM = "system"
-    ERROR = "error"
-
-class ColoredFormatter(logging.Formatter):
-    """Rangli console output formatter"""
-    COLORS = {
-        'DEBUG': '\033[36m',     # Cyan
-        'INFO': '\033[32m',      # Green
-        'WARNING': '\033[33m',   # Yellow
-        'ERROR': '\033[31m',     # Red
-        'CRITICAL': '\033[35m',  # Magenta
-        'RESET': '\033[0m'       # Reset
-    }
-    
-    def format(self, record: logging.LogRecord) -> str:
-        log_color = self.COLORS.get(record.levelname, self.COLORS['RESET'])
-        record.levelname = f"{log_color}{record.levelname}{self.COLORS['RESET']}"
-        return super().format(record)
-
-class StructuredFormatter(logging.Formatter):
-    """JSON structured logging formatter"""
-    
-    def format(self, record: logging.LogRecord) -> str:
-        log_data = {
-            "timestamp": datetime.utcnow().isoformat(),
-            "level": record.levelname,
-            "category": getattr(record, 'category', 'system'),
-            "module": record.module,
-            "function": record.funcName,
-            "line": record.lineno,
-            "message": record.getMessage(),
-            "process_id": os.getpid()
-        }
-        
-        if hasattr(record, 'extra_data'):
-            log_data['data'] = record.extra_data
-            
-        if record.exc_info:
-            log_data['exception'] = {
-                "type": record.exc_info[0].__name__,
-                "message": str(record.exc_info[1]),
-                "traceback": traceback.format_exception(*record.exc_info)
-            }
-            
-        return json.dumps(log_data, ensure_ascii=False)
-
-class LoggerManager:
-    """Markaziy logger boshqaruv tizimi"""
-    _loggers: Dict[str, logging.Logger] = {}
-    _initialized: bool = False
-    
-    @classmethod
-    def setup(cls, log_level: str = "INFO", log_dir: str = "logs") -> None:
-        """Logger tizimini sozlash"""
-        if cls._initialized: return
-        cls._initialized = True
-        
-        # Log papkasini yaratish
-        log_path = Path(log_dir)
-        log_path.mkdir(exist_ok=True)
-        
-        # Root logger sozlash
-        root_logger = logging.getLogger()
-        root_logger.setLevel(getattr(logging, log_level.upper()))
-        
-        # Console handler
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.INFO)
-        console_formatter = ColoredFormatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-        console_handler.setFormatter(console_formatter)
-        root_logger.addHandler(console_handler)
-        
-        # File handlers for different categories
-        categories = [LogCategory.BOT, LogCategory.API, LogCategory.TRADING, LogCategory.ERROR]
-        for category in categories:
-            file_handler = RotatingFileHandler(
-                log_path / f"{category.value}.log",
-                maxBytes=50 * 1024 * 1024,  # 50MB
-                backupCount=10,
-                encoding='utf-8'
-            )
-            file_handler.setLevel(logging.DEBUG)
-            file_formatter = StructuredFormatter()
-            file_handler.setFormatter(file_formatter)
-            
-            # Category-specific logger
-            cat_logger = logging.getLogger(category.value)
-            cat_logger.addHandler(file_handler)
-            cat_logger.setLevel(logging.DEBUG)
-            cls._loggers[category.value] = cat_logger
-            
-        # Error-specific handler
-        error_handler = TimedRotatingFileHandler(
-            log_path / "error.log",
-            when='midnight',
-            interval=1,
-            backupCount=30,
-            encoding='utf-8'
-        )
-        error_handler.setLevel(logging.ERROR)
-        error_handler.setFormatter(StructuredFormatter())
-        root_logger.addHandler(error_handler)
-
-def setup_logging(log_level: str = "INFO", log_dir: str = "logs") -> None:
-    """Global logging sozlash"""
-    LoggerManager.setup(log_level, log_dir)
-
-def get_logger(name: str, category: Optional[LogCategory] = None) -> logging.Logger:
-    """Logger olish"""
-    if not LoggerManager._initialized:
-        LoggerManager.setup()
-        
-    if category and category.value in LoggerManager._loggers:
-        logger = LoggerManager._loggers[category.value].getChild(name)
-    else:
-        logger = logging.getLogger(name)
-        
-    # O'zbekcha xabarlar uchun wrapper
-    class UzbekLogger:
-        def __init__(self, logger: logging.Logger):
-            self._logger = logger
-            
-        def debug(self, msg: str, *args, extra: Optional[Dict] = None, **kwargs):
-            self._logger.debug(msg, *args, extra=self._add_extra(extra), **kwargs)
-            
-        def info(self, msg: str, *args, extra: Optional[Dict] = None, **kwargs):
-            self._logger.info(msg, *args, extra=self._add_extra(extra), **kwargs)
-            
-        def warning(self, msg: str, *args, extra: Optional[Dict] = None, **kwargs):
-            self._logger.warning(msg, *args, extra=self._add_extra(extra), **kwargs)
-            
-        def error(self, msg: str, *args, exc_info=None, extra: Optional[Dict] = None, **kwargs):
-            self._logger.error(msg, *args, exc_info=exc_info, extra=self._add_extra(extra), **kwargs)
-            
-        def critical(self, msg: str, *args, extra: Optional[Dict] = None, **kwargs):
-            self._logger.critical(msg, *args, extra=self._add_extra(extra), **kwargs)
-            
-        def _add_extra(self, extra: Optional[Dict]) -> Dict:
-            """Extra ma'lumotlar qo'shish"""
-            result = {'category': category.value if category else 'system'}
-            if extra: result['extra_data'] = extra
-            return result
-            
-    return UzbekLogger(logger)
-
-def log_exception(logger: logging.Logger, msg: str = "Kutilmagan xatolik") -> Callable:
-    """Exception decorator"""
-    def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        async def async_wrapper(*args, **kwargs):
-            try:
-                return await func(*args, **kwargs)
-            except Exception as e:
-                logger.error(f"{msg}: {str(e)}", exc_info=True, extra={'function': func.__name__, 'args': str(args)[:100]})
-                raise
-                
-        @wraps(func)
-        def sync_wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                logger.error(f"{msg}: {str(e)}", exc_info=True, extra={'function': func.__name__, 'args': str(args)[:100]})
-                raise
-                
-        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
-    return decorator
-
-class ErrorTracker:
-    """Xatoliklarni kuzatish va tahlil qilish"""
-    def __init__(self, max_errors: int = 1000):
-        self.errors: list = []
-        self.max_errors = max_errors
-        self.error_counts: Dict[str, int] = {}
-        
-    def track_error(self, error_type: str, error_msg: str, context: Optional[Dict] = None) -> None:
-        """Xatolikni qayd qilish"""
-        error_data = {
-            "timestamp": datetime.now(),
-            "type": error_type,
-            "message": error_msg,
-            "context": context or {}
-        }
-        
-        self.errors.append(error_data)
-        if len(self.errors) > self.max_errors:
-            self.errors.pop(0)
-            
-        self.error_counts[error_type] = self.error_counts.get(error_type, 0) + 1
-        
-    def get_summary(self) -> Dict[str, Any]:
-        """Xatoliklar xulosasi"""
-        if not self.errors: return {"total": 0, "types": {}}
-        
-        last_hour_errors = [e for e in self.errors if (datetime.now() - e["timestamp"]).seconds < 3600]
-        
-        return {
-            "total": len(self.errors),
-            "last_hour": len(last_hour_errors),
-            "types": dict(self.error_counts),
-            "most_common": max(self.error_counts.items(), key=lambda x: x[1])[0] if self.error_counts else None,
-            "latest": self.errors[-1] if self.errors else None
-        }
-
-# Global error tracker
-error_tracker = ErrorTracker()
-
-# O'zbekcha log xabarlari
-LOG_MESSAGES = {
-    # Bot messages
-    "bot_start": "🤖 SignalBot ishga tushdi",
-    "bot_stop": "🛑 SignalBot to'xtatildi",
-    "bot_pause": "⏸️ SignalBot pauza rejimida",
-    "bot_resume": "▶️ SignalBot davom ettirildi",
-    
-    # Trading messages
-    "signal_generated": "📊 Yangi signal yaratildi: {pair}",
-    "order_placed": "💰 Buyurtma joylashtirildi: {order_type} {pair}",
-    "stop_loss_hit": "🛑 Stop Loss ishga tushdi: {pair} ({loss}%)",
-    "take_profit_hit": "🎯 Take Profit erishildi: {pair} ({profit}%)",
-    "position_closed": "📈 Pozitsiya yopildi: {pair}",
-    
-    # API messages
-    "api_request": "🌐 API so'rov: {provider} - {endpoint}",
-    "api_success": "✅ API javob: {provider} ({time}ms)",
-    "api_error": "❌ API xato: {provider} - {error}",
-    "api_fallback": "🔄 Fallback API: {from_provider} -> {to_provider}",
-    
-    # Analysis messages
-    "analysis_start": "🔍 Tahlil boshlandi: {type}",
-    "analysis_complete": "✅ Tahlil tugadi: {type} ({time}s)",
-    "whale_detected": "🐋 Whale harakati aniqlandi: {amount} {coin}",
-    "sentiment_change": "📊 Sentiment o'zgarishi: {old} -> {new}",
-    
-    # System messages
-    "config_loaded": "⚙️ Konfiguratsiya yuklandi",
-    "database_connected": "💾 Database ulandi",
-    "error_critical": "🚨 KRITIK XATO: {error}",
-    "performance_warning": "⚠️ Performance ogohlantirish: {metric}"
+# Log levels
+LOG_LEVELS = {
+    "DEBUG": 10,
+    "INFO": 20,
+    "SUCCESS": 25,
+    "WARNING": 30,
+    "ERROR": 40,
+    "CRITICAL": 50
 }
 
-def log_message(key: str, **kwargs) -> str:
-    """O'zbekcha log xabarini olish"""
-    template = LOG_MESSAGES.get(key, key)
-    try: return template.format(**kwargs)
-    except: return f"{key}: {kwargs}"
+class TelegramLogHandler:
+    """Telegram orqali log yuborish"""
+    def __init__(self):
+        self.queue = asyncio.Queue(maxsize=100)
+        self.enabled = False
+        self.min_level = "ERROR"
+        
+    async def send_log(self, message: str, level: str):
+        """Telegram orqali log yuborish"""
+        try:
+            if not self.enabled:
+                return
+                
+            if LOG_LEVELS.get(level, 0) < LOG_LEVELS.get(self.min_level, 40):
+                return
+                
+            # Add to queue
+            await self.queue.put({
+                "message": message,
+                "level": level,
+                "timestamp": TimeUtils.now_uzb()
+            })
+            
+        except asyncio.QueueFull:
+            pass  # Skip if queue is full
+            
+    async def process_queue(self):
+        """Queue ni ishlov berish"""
+        while True:
+            try:
+                if not self.queue.empty():
+                    log_data = await self.queue.get()
+                    
+                    # Format message
+                    emoji = {
+                        "DEBUG": "🔍",
+                        "INFO": "ℹ️",
+                        "SUCCESS": "✅",
+                        "WARNING": "⚠️",
+                        "ERROR": "❌",
+                        "CRITICAL": "🚨"
+                    }.get(log_data["level"], "📝")
+                    
+                    message = (
+                        f"{emoji} <b>{log_data['level']}</b>\n"
+                        f"🕐 {log_data['timestamp'].strftime('%H:%M:%S')}\n"
+                        f"📝 {log_data['message']}"
+                    )
+                    
+                    # Send via telegram (will be imported dynamically)
+                    try:
+                        from telegram.bot_interface import telegram_interface
+                        await telegram_interface.send_admin_message(message)
+                    except:
+                        pass
+                        
+                await asyncio.sleep(1)
+                
+            except Exception as e:
+                await asyncio.sleep(5)
+
+# Global Telegram handler
+telegram_handler = TelegramLogHandler()
+
+def setup_logging():
+    """Logger ni sozlash"""
+    # Remove default handler
+    logger.remove()
+    
+    # Get log directory
+    log_dir = Path(__file__).parent.parent.parent / "logs"
+    log_dir.mkdir(exist_ok=True)
+    
+    # Console handler
+    logger.add(
+        sys.stderr,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+        level="INFO",
+        colorize=True
+    )
+    
+    # File handler - all logs
+    logger.add(
+        log_dir / "signalbot_{time:YYYY-MM-DD}.log",
+        rotation="00:00",
+        retention="30 days",
+        level="DEBUG",
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
+        encoding="utf-8"
+    )
+    
+    # Error file handler
+    logger.add(
+        log_dir / "errors_{time:YYYY-MM-DD}.log",
+        rotation="00:00",
+        retention="90 days",
+        level="ERROR",
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
+        encoding="utf-8"
+    )
+    
+    # Trade logs
+    logger.add(
+        log_dir / "trades_{time:YYYY-MM-DD}.log",
+        rotation="00:00",
+        retention="365 days",
+        level="INFO",
+        filter=lambda record: "trade" in record["extra"],
+        format="{time:YYYY-MM-DD HH:mm:ss} | TRADE | {message}",
+        encoding="utf-8"
+    )
+    
+    # Performance logs
+    logger.add(
+        log_dir / "performance_{time:YYYY-MM-DD}.log",
+        rotation="00:00",
+        retention="30 days",
+        level="INFO",
+        filter=lambda record: "performance" in record["extra"],
+        format="{time:YYYY-MM-DD HH:mm:ss} | PERF | {message}",
+        encoding="utf-8"
+    )
+    
+    # Custom Telegram handler
+    def telegram_sink(message):
+        """Telegram sink"""
+        try:
+            record = message.record
+            if telegram_handler.enabled:
+                asyncio.create_task(
+                    telegram_handler.send_log(
+                        record["message"],
+                        record["level"].name
+                    )
+                )
+        except:
+            pass
+            
+    logger.add(
+        telegram_sink,
+        level="ERROR",
+        filter=lambda record: record["level"].no >= LOG_LEVELS["ERROR"]
+    )
+    
+    # Start Telegram handler
+    asyncio.create_task(telegram_handler.process_queue())
+    
+    logger.info("📝 Logging system initialized")
+
+def get_logger(name: str):
+    """Logger olish - Fixed to return logger instance"""
+    return logger.bind(name=name)
+
+def log_trade(symbol: str, action: str, details: Dict[str, Any]):
+    """Savdo logini yozish"""
+    logger.bind(trade=True).info(
+        f"{symbol} | {action} | {json.dumps(details, ensure_ascii=False)}"
+    )
+
+def log_performance(metric: str, value: float, details: Optional[Dict] = None):
+    """Performance metrikasini log qilish"""
+    msg = f"{metric}: {value}"
+    if details:
+        msg += f" | {json.dumps(details, ensure_ascii=False)}"
+    logger.bind(performance=True).info(msg)
+
+def log_exception(func):
+    """Exception logging decorator"""
+    @wraps(func)
+    async def async_wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Exception in {func.__name__}: {e}", exc_info=True)
+            raise
+            
+    @wraps(func)
+    def sync_wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Exception in {func.__name__}: {e}", exc_info=True)
+            raise
+            
+    if asyncio.iscoroutinefunction(func):
+        return async_wrapper
+    return sync_wrapper
+
+class LogContext:
+    """Context manager for structured logging"""
+    def __init__(self, **kwargs):
+        self.context = kwargs
+        
+    def __enter__(self):
+        self.token = logger.contextualize(**self.context)
+        self.token.__enter__()
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.token.__exit__(exc_type, exc_val, exc_tb)
+
+# Utility functions
+def enable_telegram_logging(min_level: str = "ERROR"):
+    """Telegram logging yoqish"""
+    telegram_handler.enabled = True
+    telegram_handler.min_level = min_level
+    logger.info(f"Telegram logging enabled (min level: {min_level})")
+
+def disable_telegram_logging():
+    """Telegram logging o'chirish"""
+    telegram_handler.enabled = False
+    logger.info("Telegram logging disabled")
+
+def set_log_level(level: str):
+    """Log darajasini o'zgartirish"""
+    logger.remove()
+    setup_logging()
+    logger.info(f"Log level changed to: {level}")
+
+# Export all necessary items
+__all__ = [
+    "logger",
+    "get_logger",
+    "setup_logging",
+    "log_trade",
+    "log_performance",
+    "log_exception",
+    "LogContext",
+    "enable_telegram_logging",
+    "disable_telegram_logging",
+    "set_log_level"
+]
