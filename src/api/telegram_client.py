@@ -532,7 +532,7 @@ Bearish: {update_data.get('bearish_ratio', 0):.1%}
 
 # Global instances
 telegram_client = TelegramClient()
-telegram_notifier = TelegramNotifier()"inline_keyboard": buttons}
+telegram_notifier = TelegramNotifier()
         else:
             # Reply keyboard
             buttons = [[btn.text for btn in row] for row in keyboard.buttons]
