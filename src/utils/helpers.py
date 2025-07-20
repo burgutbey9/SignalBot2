@@ -16,7 +16,7 @@ import json
 import aiohttp
 from collections import deque, defaultdict
 
-from src.utils.logger import get_logger
+#from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
