@@ -1,98 +1,72 @@
-# Python
+﻿# Python
 __pycache__/
 *.py[cod]
-*$py.class
+*.class
 *.so
 .Python
-env/
-venv/
-ENV/
-VENV/
-.venv
-pip-log.txt
-pip-delete-this-directory.txt
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.mypy_cache/
-.dmypy.json
-dmypy.json
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# Environment
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# Environment variables
 .env
 .env.local
-.env.*.local
+.env.production
+.env.development
+
+# Logs
+logs/
+*.log
+
+# Cache
+.cache/
+data/cache/
+*.tmp
+*.temp
 
 # IDE
-.vscode/
+.vscode/settings.json
+.vscode/launch.json
 .idea/
 *.swp
 *.swo
-*~
+
+# OS
 .DS_Store
-
-# Logs
-logs/*.log
-logs/*.log.*
-*.log
-
-# Data files
-data/trading_bot.db
-data/signalbot.db
-data/cache/*.json
-data/cache/*.pkl
-data/models/*.pkl
-data/models/*.h5
-data/models/*.pth
-data/backtest/*.csv
-data/backtest/*.parquet
-
-# But keep directory structure
-!logs/.gitkeep
-!data/.gitkeep
-!data/cache/.gitkeep
-!data/models/.gitkeep
-!data/backtest/.gitkeep
-
-# Secrets
-*.key
-*.pem
-*.cert
-
-# Testing
-.coverage
-coverage.xml
-*.cover
-.hypothesis/
-
-# Build
-build/
-dist/
-*.egg-info/
-.eggs/
-
-# Documentation
-docs/_build/
-site/
-
-# Temporary files
-*.tmp
-*.bak
-*.swp
-*~
-.~*
-
-# OS files
 Thumbs.db
-Desktop.ini
 
-# Python notebooks
-.ipynb_checkpoints/
-*.ipynb
-
-# Other
+# Database
+*.db
+*.sqlite
 *.sqlite3
-*.db-journal
-node_modules/
-.npm
+
+# Models and Data
+data/models/
+data/backtest/
+*.model
+*.pkl
+*.joblib
+
+# Large files
+*.zip
+*.tar.gz
+*.7z
