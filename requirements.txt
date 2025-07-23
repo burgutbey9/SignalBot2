@@ -1,81 +1,105 @@
-# Core dependencies
-aiohttp>=3.9.1
-aiofiles>=23.2.1
-asyncio-mqtt>=0.16.1
+# SignalBot2 - Professional Crypto Trading Bot
+# All required dependencies with proper versions
+
+# Core Python packages
+asyncio==3.4.3
+aiohttp>=3.8.0
+aiofiles>=0.8.0
+asyncio-throttle>=1.0.2
+
+# Data processing and analysis
+pandas>=1.5.0
+numpy>=1.21.0
+scipy>=1.9.0
+
+# Machine Learning and AI
+scikit-learn>=1.1.0
+transformers>=4.25.0
+torch>=1.13.0
+
+# Crypto trading APIs
+ccxt>=2.5.0
+python-binance>=1.0.17
+web3>=6.0.0
 
 # Database
-sqlalchemy>=2.0.23
-aiosqlite>=0.19.0
-alembic>=1.12.1
+sqlalchemy[asyncio]>=1.4.44
+aiosqlite>=0.17.0
+alembic>=1.8.0
 
-# Data processing
-pandas>=2.1.4
-numpy>=1.26.2
-scikit-learn>=1.3.2
+# Telegram Bot
+python-telegram-bot>=20.0
+aiogram>=3.0.0
 
-# Crypto trading
-ccxt>=4.1.56
-web3>=6.11.4
+# Configuration and environment
+python-dotenv>=0.21.0
+pydantic>=1.10.0
+pyyaml>=6.0
 
-# Telegram
-python-telegram-bot>=20.7
-aiogram>=3.3.0
+# Time and timezone
+pytz>=2022.7
+python-dateutil>=2.8.0
 
-# AI/ML
-transformers>=4.36.2
-torch>=2.1.2
-google-generativeai>=0.3.2
-anthropic>=0.8.1
-openai>=1.6.1
+# Networking and HTTP
+requests>=2.28.0
+httpx>=0.24.0
+websockets>=10.4
 
-# API clients
-requests>=2.31.0
-websockets>=12.0
-httpx>=0.25.2
+# Cryptography and security
+cryptography>=38.0.0
+pycryptodome>=3.15.0
 
-# Utils
-python-dotenv>=1.0.0
-pytz>=2023.3
-pydantic>=2.5.2
-python-dateutil>=2.8.2
+# Logging and monitoring
+structlog>=22.3.0
+prometheus-client>=0.15.0
 
-# Monitoring & Logging
-loguru>=0.7.2
-prometheus-client>=0.19.0
-sentry-sdk>=1.39.1
+# Development and testing
+pytest>=7.2.0
+pytest-asyncio>=0.20.0
+black>=22.10.0
+flake8>=5.0.0
 
-# Testing
-pytest>=7.4.3
-pytest-asyncio>=0.21.1
-pytest-cov>=4.1.0
-pytest-mock>=3.12.0
-faker>=20.1.0
+# Data visualization (optional)
+plotly>=5.11.0
+matplotlib>=3.6.0
 
-# Development
-black>=23.12.1
-flake8>=7.0.0
-mypy>=1.7.1
-isort>=5.13.2
-pre-commit>=3.6.0
+# Performance monitoring
+memory-profiler>=0.60.0
+psutil>=5.9.0
 
-# Performance
-# uvloop>=0.19.0
-orjson>=3.9.10
-msgpack>=1.0.7
+# JSON and data formats
+orjson>=3.8.0
+msgpack>=1.0.0
 
-# Security
-cryptography>=41.0.7
-python-jose>=3.3.0
-passlib>=1.7.4
+# Rate limiting and throttling
+slowapi>=0.1.9
+limits>=2.8.0
 
-# Rate limiting
-aioredis>=2.0.1
-aiocache>=0.12.2
+# Async utilities
+asyncio-pool>=0.6.0
+aioredis>=2.0.0
 
-# Documentation
-sphinx>=7.2.6
-sphinx-rtd-theme>=2.0.0
+# Mathematical calculations
+sympy>=1.11.0
+ta-lib>=0.4.25  # Technical analysis library
 
-# Additional crypto dependencies
-ta>=0.10.2
-python-binance>=1.0.17
+# Fallback APIs and scraping
+beautifulsoup4>=4.11.0
+selenium>=4.7.0
+
+# Additional crypto utilities
+python-kucoin>=2.1.3
+bitmex>=0.2.2
+
+# Backup and cloud storage
+boto3>=1.26.0  # AWS S3 for backups
+google-cloud-storage>=2.7.0  # Google Cloud
+
+# Notification services
+slack-sdk>=3.19.0
+discord.py>=2.1.0
+
+# System utilities
+click>=8.1.0  # CLI interface
+rich>=12.6.0  # Rich console output
+typer>=0.7.0  # Modern CLI framework
