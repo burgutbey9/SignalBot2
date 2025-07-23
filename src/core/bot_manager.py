@@ -1,6 +1,7 @@
 """
-Bot Lifecycle Manager and Signal Controller
+Bot Lifecycle Manager and Signal Controller - FIXED VERSION
 Bot ishga tushirish, to'xtatish, signal boshqaruv
+All import issues resolved
 """
 import asyncio
 from typing import Dict, Any, Optional, List, Callable
@@ -10,10 +11,10 @@ from enum import Enum, auto
 import signal
 import sys
 
+# ✅ FIXED: Correct imports without circular dependencies
 from config.config import config_manager, TradingMode
 from utils.logger import get_logger
 from utils.helpers import TimeUtils, PerformanceMonitor
-from api.telegram_client import telegram_notifier
 from utils.database import DatabaseManager, BotState, TradingSignal
 
 logger = get_logger(__name__)
@@ -61,7 +62,7 @@ class BotStatistics:
         return self.total_pnl / self.executed_trades
 
 class BotManager:
-    """Asosiy bot manager"""
+    """Asosiy bot manager - Fixed imports"""
     def __init__(self):
         self.status = BotStatus.STOPPED
         self.signal_mode = SignalMode.PAUSED
@@ -70,7 +71,7 @@ class BotManager:
         self.performance_monitor = PerformanceMonitor()
         self.db_manager: Optional[DatabaseManager] = None
         
-        # Components
+        # Components - ✅ FIXED: Initialize as empty dict
         self._components: Dict[str, Any] = {}
         self._tasks: Dict[str, asyncio.Task] = {}
         self._shutdown_handlers: List[Callable] = []
@@ -82,7 +83,7 @@ class BotManager:
         self._last_stop_reset = TimeUtils.now_uzb().date()
         
     async def initialize(self) -> bool:
-        """Bot komponentlarini sozlash"""
+        """Bot komponentlarini sozlash - Fixed version"""
         try:
             logger.info("🚀 Bot initialization boshlandi...")
             self.status = BotStatus.STARTING
@@ -122,7 +123,7 @@ class BotManager:
         signal.signal(signal.SIGTERM, signal_handler)
         
     async def start(self) -> bool:
-        """Botni ishga tushirish"""
+        """Botni ishga tushirish - Fixed version"""
         if self.status == BotStatus.RUNNING:
             logger.warning("Bot allaqachon ishlamoqda")
             return True
@@ -131,10 +132,13 @@ class BotManager:
             logger.info("🟢 Bot ishga tushmoqda...")
             self.status = BotStatus.STARTING
             
-            # Initialize components
+            # Initialize components if not done
             if not await self.initialize():
                 return False
                 
+            # ✅ FIXED: Load components inside function to avoid circular imports
+            await self._load_components()
+            
             # Start components
             await self._start_components()
             
@@ -146,12 +150,8 @@ class BotManager:
             self.status = BotStatus.RUNNING
             self.statistics.start_time = TimeUtils.now_uzb()
             
-            # Notify
-            await telegram_notifier.notify_market_update({
-                "mood": "NEUTRAL",
-                "message": "🤖 Bot muvaffaqiyatli ishga tushdi!",
-                "timestamp": TimeUtils.now_uzb()
-            })
+            # ✅ FIXED: Use message handler for notifications
+            await self._send_startup_notification()
             
             logger.info("✅ Bot to'liq ishga tushdi")
             return True
@@ -161,40 +161,104 @@ class BotManager:
             self.status = BotStatus.ERROR
             self.statistics.errors_count += 1
             return False
+    
+    async def _load_components(self):
+        """Komponentlarni yuklash - Fixed imports"""
+        try:
+            # ✅ FIXED: Import inside function to avoid circular imports
+            logger.info("📦 Komponentlar yuklanmoqda...")
+            
+            # Import and store analyzers
+            from analysis.ict_analyzer import ict_analyzer
+            self._components["ict_analyzer"] = ict_analyzer
+            
+            from analysis.smt_analyzer import smt_analyzer
+            self._components["smt_analyzer"] = smt_analyzer
+            
+            from analysis.order_flow import order_flow_analyzer
+            self._components["order_flow_analyzer"] = order_flow_analyzer
+            
+            from analysis.sentiment import sentiment_analyzer
+            self._components["sentiment_analyzer"] = sentiment_analyzer
+            
+            # Import trading components
+            from trading.signal_generator import signal_generator
+            self._components["signal_generator"] = signal_generator
+            
+            from trading.execution_engine import execution_engine
+            self._components["execution_engine"] = execution_engine
+            
+            # Import AI orchestrator
+            from api.ai_clients import ai_orchestrator
+            self._components["ai_orchestrator"] = ai_orchestrator
+            
+            # Import message handler
+            from telegram.message_handler import notification_manager
+            self._components["notification_manager"] = notification_manager
+            
+            logger.info(f"✅ {len(self._components)} komponent yuklandi")
+            
+        except Exception as e:
+            logger.error(f"❌ Komponentlarni yuklashda xato: {e}")
+            raise
             
     async def _start_components(self):
-        """Komponentlarni ishga tushirish"""
-        # Import here to avoid circular imports
-        from analysis.ict_analyzer import ICTAnalyzer
-        from analysis.smt_analyzer import SMTAnalyzer
-        from analysis.order_flow import OrderFlowAnalyzer
-        from analysis.sentiment import SentimentAnalyzer
-        from trading.signal_generator import SignalGenerator
-        from trading.execution_engine import ExecutionEngine
-        from api.ai_clients import ai_orchestrator
-        
-        # Initialize analyzers
-        self._components["ict"] = ICTAnalyzer()
-        self._components["smt"] = SMTAnalyzer()
-        self._components["order_flow"] = OrderFlowAnalyzer()
-        self._components["sentiment"] = SentimentAnalyzer()
-        
-        # Initialize trading components
-        self._components["signal_generator"] = SignalGenerator()
-        self._components["execution_engine"] = ExecutionEngine()
-        
-        # Initialize AI
-        await ai_orchestrator.initialize()
-        
-        # Start component tasks
-        for name, component in self._components.items():
-            if hasattr(component, "start"):
-                self._tasks[name] = asyncio.create_task(component.start())
+        """Komponentlarni ishga tushirish - Fixed version"""
+        try:
+            # Start AI orchestrator first
+            ai_orchestrator = self._components.get("ai_orchestrator")
+            if ai_orchestrator and hasattr(ai_orchestrator, "initialize"):
+                await ai_orchestrator.initialize()
+                logger.info("✅ AI Orchestrator ishga tushdi")
+            
+            # Start analyzers
+            analyzer_names = ["ict_analyzer", "smt_analyzer", "order_flow_analyzer", "sentiment_analyzer"]
+            for name in analyzer_names:
+                component = self._components.get(name)
+                if component:
+                    # ✅ FIXED: Check if component has start method
+                    if hasattr(component, "start"):
+                        self._tasks[name] = asyncio.create_task(component.start())
+                    elif hasattr(component, "initialize"):
+                        await component.initialize()
+                    logger.info(f"✅ {name} ishga tushdi")
+            
+            # Start trading components
+            trading_names = ["signal_generator", "execution_engine"]
+            for name in trading_names:
+                component = self._components.get(name)
+                if component:
+                    if hasattr(component, "start"):
+                        self._tasks[name] = asyncio.create_task(component.start())
+                    elif hasattr(component, "initialize"):
+                        await component.initialize()
+                    logger.info(f"✅ {name} ishga tushdi")
                 
-        logger.info(f"✅ {len(self._components)} ta komponent ishga tushdi")
-        
+            logger.info(f"✅ Barcha komponentlar ishga tushdi")
+            
+        except Exception as e:
+            logger.error(f"❌ Komponentlarni ishga tushirishda xato: {e}")
+            raise
+            
+    async def _send_startup_notification(self):
+        """Startup notification yuborish"""
+        try:
+            notification_manager = self._components.get("notification_manager")
+            if notification_manager:
+                await notification_manager.notify_system_info({
+                    "status": "STARTED",
+                    "message": f"🤖 Bot muvaffaqiyatli ishga tushdi!\n\n"
+                              f"📊 Mode: {self.trading_mode.value}\n"
+                              f"⚖️ Risk: {config_manager.trading.risk_percentage}%\n"
+                              f"💱 Symbols: {len(config_manager.trading.pairs)}\n\n"
+                              f"Bot tayyor!",
+                    "component": "BotManager"
+                })
+        except Exception as e:
+            logger.error(f"Startup notification xatosi: {e}")
+            
     async def stop(self) -> bool:
-        """Botni to'xtatish"""
+        """Botni to'xtatish - Fixed version"""
         if self.status == BotStatus.STOPPED:
             logger.warning("Bot allaqachon to'xtatilgan")
             return True
@@ -204,6 +268,9 @@ class BotManager:
             self.status = BotStatus.STOPPING
             self._running = False
             
+            # Send shutdown notification
+            await self._send_shutdown_notification()
+            
             # Stop all tasks
             for name, task in self._tasks.items():
                 if not task.done():
@@ -211,7 +278,7 @@ class BotManager:
                     try:
                         await task
                     except asyncio.CancelledError:
-                        pass
+                        logger.info(f"Task {name} cancelled")
                         
             # Stop components
             await self._stop_components()
@@ -233,15 +300,31 @@ class BotManager:
             self.statistics.errors_count += 1
             return False
             
+    async def _send_shutdown_notification(self):
+        """Shutdown notification yuborish"""
+        try:
+            notification_manager = self._components.get("notification_manager")
+            if notification_manager:
+                await notification_manager.notify_system_info({
+                    "status": "STOPPED",
+                    "message": "🛑 Bot to'xtatilmoqda...\n\n"
+                              "Barcha pozitsiyalar saqlanadi.\n"
+                              "Bot tez orada qayta ishga tushadi.",
+                    "component": "BotManager"
+                })
+        except Exception as e:
+            logger.error(f"Shutdown notification xatosi: {e}")
+            
     async def _stop_components(self):
-        """Komponentlarni to'xtatish"""
+        """Komponentlarni to'xtatish - Fixed version"""
         for name, component in self._components.items():
-            if hasattr(component, "stop"):
-                try:
+            try:
+                if hasattr(component, "stop"):
                     await component.stop()
-                except Exception as e:
-                    logger.error(f"Component {name} stop xatosi: {e}")
-                    
+                    logger.info(f"✅ {name} to'xtatildi")
+            except Exception as e:
+                logger.error(f"❌ Component {name} stop xatosi: {e}")
+                
     async def pause(self) -> bool:
         """Botni pause qilish"""
         if self.status != BotStatus.RUNNING:
@@ -253,11 +336,14 @@ class BotManager:
         
         logger.info("⏸️ Bot pause qilindi")
         
-        await telegram_notifier.notify_market_update({
-            "mood": "NEUTRAL",
-            "message": "⏸️ Bot vaqtincha to'xtatildi",
-            "timestamp": TimeUtils.now_uzb()
-        })
+        # Send notification
+        notification_manager = self._components.get("notification_manager")
+        if notification_manager:
+            await notification_manager.notify_system_info({
+                "status": "PAUSED",
+                "message": "⏸️ Bot vaqtincha to'xtatildi",
+                "component": "BotManager"
+            })
         
         return True
         
@@ -272,11 +358,14 @@ class BotManager:
         
         logger.info("▶️ Bot davom ettirildi")
         
-        await telegram_notifier.notify_market_update({
-            "mood": "NEUTRAL",
-            "message": "▶️ Bot yana ishga tushdi",
-            "timestamp": TimeUtils.now_uzb()
-        })
+        # Send notification
+        notification_manager = self._components.get("notification_manager")
+        if notification_manager:
+            await notification_manager.notify_system_info({
+                "status": "RESUMED",
+                "message": "▶️ Bot yana ishga tushdi",
+                "component": "BotManager"
+            })
         
         return True
         
@@ -287,7 +376,10 @@ class BotManager:
         # Run shutdown handlers
         for handler in self._shutdown_handlers:
             try:
-                await handler() if asyncio.iscoroutinefunction(handler) else handler()
+                if asyncio.iscoroutinefunction(handler):
+                    await handler()
+                else:
+                    handler()
             except Exception as e:
                 logger.error(f"Shutdown handler xatosi: {e}")
                 
@@ -317,7 +409,7 @@ class BotManager:
         return True
         
     async def process_signal(self, signal_data: Dict[str, Any]) -> bool:
-        """Signalni qayta ishlash"""
+        """Signalni qayta ishlash - Fixed version"""
         if self.signal_mode == SignalMode.PAUSED:
             logger.info("Signal mode paused, signal o'tkazib yuborildi")
             return False
@@ -337,7 +429,9 @@ class BotManager:
                 await self.db_manager.save_signal(TradingSignal(**signal_data))
                 
             # Send notification
-            await telegram_notifier.notify_signal(signal_data)
+            notification_manager = self._components.get("notification_manager")
+            if notification_manager:
+                await notification_manager.notify_signal(signal_data)
             
             # Execute trade if auto trading enabled
             if self._auto_trading_enabled and self.trading_mode in [TradingMode.LIVE, TradingMode.PAPER]:
@@ -361,18 +455,23 @@ class BotManager:
                 logger.error("Execution engine topilmadi")
                 return False
                 
-            result = await execution_engine.execute_signal(signal_data)
+            # ✅ FIXED: Check if method exists
+            if hasattr(execution_engine, "execute_signal"):
+                result = await execution_engine.execute_signal(signal_data)
+            else:
+                logger.warning("execute_signal method mavjud emas")
+                return False
             
-            if result.get("success"):
+            if result and result.get("success"):
                 self.statistics.successful_trades += 1
             else:
                 self.statistics.failed_trades += 1
                 
                 # Check stop loss
-                if result.get("reason") == "stop_loss":
+                if result and result.get("reason") == "stop_loss":
                     self._daily_stop_count += 1
                     
-            return result.get("success", False)
+            return result.get("success", False) if result else False
             
         except Exception as e:
             logger.error(f"Trade execution xatosi: {e}")
@@ -405,8 +504,11 @@ class BotManager:
                 # Check components health
                 for name, component in self._components.items():
                     if hasattr(component, "is_healthy"):
-                        if not await component.is_healthy():
-                            logger.warning(f"Component {name} unhealthy")
+                        try:
+                            if not await component.is_healthy():
+                                logger.warning(f"Component {name} unhealthy")
+                        except Exception as e:
+                            logger.error(f"Health check xatosi {name}: {e}")
                             
                 await asyncio.sleep(60)  # Every minute
                 
@@ -426,10 +528,13 @@ class BotManager:
                     
                     # Critical issues
                     if health_status.get("critical"):
-                        await telegram_notifier.notify_error(
-                            f"🚨 CRITICAL: {health_status.get('message')}",
-                            critical=True
-                        )
+                        notification_manager = self._components.get("notification_manager")
+                        if notification_manager:
+                            await notification_manager.notify_error({
+                                "message": health_status.get('message', 'Unknown critical error'),
+                                "critical": True,
+                                "component": "HealthCheck"
+                            })
                         
                 await asyncio.sleep(300)  # Every 5 minutes
                 
@@ -448,9 +553,13 @@ class BotManager:
         # Check each component
         for name, component in self._components.items():
             if hasattr(component, "get_health_status"):
-                status = await component.get_health_status()
-                health["components"][name] = status
-                if not status.get("healthy", True):
+                try:
+                    status = await component.get_health_status()
+                    health["components"][name] = status
+                    if not status.get("healthy", True):
+                        health["healthy"] = False
+                except Exception as e:
+                    health["components"][name] = {"healthy": False, "error": str(e)}
                     health["healthy"] = False
                     
         # Check metrics
@@ -469,34 +578,42 @@ class BotManager:
         if not self.db_manager:
             return
             
-        state = await self.db_manager.get_bot_state()
-        if state:
-            self.statistics.total_signals = state.total_signals
-            self.statistics.executed_trades = state.executed_trades
-            self.statistics.successful_trades = state.successful_trades
-            self.statistics.failed_trades = state.failed_trades
-            self.statistics.total_pnl = state.total_pnl
-            self._daily_stop_count = state.daily_stop_count
+        try:
+            state = await self.db_manager.get_bot_state()
+            if state:
+                self.statistics.total_signals = state.total_signals
+                self.statistics.executed_trades = state.executed_trades
+                self.statistics.successful_trades = state.successful_trades
+                self.statistics.failed_trades = state.failed_trades
+                self.statistics.total_pnl = state.total_pnl
+                self._daily_stop_count = state.daily_stop_count
+                logger.info("✅ Bot state yuklandi")
+        except Exception as e:
+            logger.error(f"Bot state yuklashda xato: {e}")
             
     async def _save_bot_state(self):
         """Bot holatini saqlash"""
         if not self.db_manager:
             return
             
-        state = BotState(
-            status=self.status.name,
-            signal_mode=self.signal_mode.name,
-            auto_trading=self._auto_trading_enabled,
-            total_signals=self.statistics.total_signals,
-            executed_trades=self.statistics.executed_trades,
-            successful_trades=self.statistics.successful_trades,
-            failed_trades=self.statistics.failed_trades,
-            total_pnl=self.statistics.total_pnl,
-            daily_stop_count=self._daily_stop_count,
-            last_update=TimeUtils.now_uzb()
-        )
-        
-        await self.db_manager.save_bot_state(state)
+        try:
+            state = BotState(
+                status=self.status.name,
+                signal_mode=self.signal_mode.name,
+                auto_trading=self._auto_trading_enabled,
+                total_signals=self.statistics.total_signals,
+                executed_trades=self.statistics.executed_trades,
+                successful_trades=self.statistics.successful_trades,
+                failed_trades=self.statistics.failed_trades,
+                total_pnl=self.statistics.total_pnl,
+                daily_stop_count=self._daily_stop_count,
+                last_update=TimeUtils.now_uzb()
+            )
+            
+            await self.db_manager.save_bot_state(state)
+            logger.info("✅ Bot state saqlandi")
+        except Exception as e:
+            logger.error(f"Bot state saqlashda xato: {e}")
         
     def get_status(self) -> Dict[str, Any]:
         """Bot holatini olish"""
@@ -520,6 +637,28 @@ class BotManager:
     def register_shutdown_handler(self, handler: Callable):
         """Shutdown handler qo'shish"""
         self._shutdown_handlers.append(handler)
+        
+    async def get_performance_report(self) -> Dict[str, Any]:
+        """Performance hisoboti"""
+        try:
+            uptime = (TimeUtils.now_uzb() - self.statistics.start_time).total_seconds()
+            
+            return {
+                "uptime_hours": uptime / 3600,
+                "total_signals": self.statistics.total_signals,
+                "executed_trades": self.statistics.executed_trades,
+                "successful_trades": self.statistics.successful_trades,
+                "failed_trades": self.statistics.failed_trades,
+                "win_rate": self.statistics.win_rate,
+                "total_pnl": self.statistics.total_pnl,
+                "average_pnl": self.statistics.average_pnl,
+                "daily_stop_count": self._daily_stop_count,
+                "errors_count": self.statistics.errors_count,
+                "performance_metrics": self.performance_monitor.get_summary()
+            }
+        except Exception as e:
+            logger.error(f"Performance report xatosi: {e}")
+            return {}
 
-# Global instance
+# ✅ FIXED: Global instance
 bot_manager = BotManager()
